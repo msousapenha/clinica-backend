@@ -1,0 +1,142 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Paciente {
+  id           String   @id @default(uuid())
+  nome         String
+  whatsapp     String
+  ultimaVisita DateTime?
+  status       String   @default("ativo")
+  criadoEm     DateTime @default(now())
+
+  // Relações futuras (um paciente pode ter vários agendamentos)
+  agendamentos Agendamento[]
+  anamnese     Anamnese? 
+  evolucoes    Evolucao[]
+}
+
+model Profissional {
+  id            String   @id @default(uuid())
+  nome          String
+  especialidade String
+  conselho      String?
+  telefone      String
+  comissao      Int      @default(0)
+  status        String   @default("ativo")
+
+  agendamentos  Agendamento[]
+  evolucoes     Evolucao[]
+}
+
+model Produto {
+  id            String   @id @default(uuid())
+  nome          String
+  categoria     String
+  unidade       String
+  qtd           Int      @default(0)
+  min           Int      @default(0)
+  precoMedio    Float    @default(0)
+  movimentacoes Movimentacao[]
+  criadoEm      DateTime @default(now())
+}
+
+model Movimentacao {
+  id            String   @id @default(uuid())
+  tipo          String   // "ENTRADA" ou "SAIDA"
+  qtd           Int
+  valorUnitario Float
+  fornecedor    String?
+  lote          String?
+  validade      DateTime?
+  data          DateTime @default(now())
+  
+  produtoId     String
+  produto       Produto  @relation(fields: [produtoId], references: [id], onDelete: Cascade)
+
+  agendamentoId String?
+  agendamento   Agendamento? @relation(fields: [agendamentoId], references: [id])
+
+  transacaoFinanceira Transacao?
+}
+
+model Procedimento {
+  id        String   @id @default(uuid())
+  nome      String
+  valor     Float
+  status    String   @default("ativo") // 'ativo' ou 'inativo'
+  criadoEm  DateTime @default(now())
+
+  // Relacionamento com Agendamentos
+  agendamentos Agendamento[]
+}
+
+model Agendamento {
+  id             String   @id @default(uuid())
+  dataHorario    DateTime
+  status         String   @default("Agendado")
+  
+  pacienteId     String
+  paciente       Paciente @relation(fields: [pacienteId], references: [id])
+  
+  profissionalId String
+  profissional   Profissional @relation(fields: [profissionalId], references: [id])
+
+  insumosUsados  Movimentacao[]
+
+  procedimentos  Procedimento[]
+
+  transacaoFinanceira Transacao[]
+}
+
+model Anamnese {
+  id               String   @id @default(uuid())
+  alergias         String?
+  roacutan         String?
+  gestanteLactante String?
+
+  pacienteId       String   @unique
+  paciente         Paciente @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+}
+
+model Evolucao {
+  id             String   @id @default(uuid())
+  data           DateTime @default(now())
+  texto          String
+
+  pacienteId     String
+  paciente       Paciente @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
+
+  profissionalId String?
+  profissional   Profissional? @relation(fields: [profissionalId], references: [id])
+}
+
+model Usuario {
+  id         String   @id @default(uuid())
+  nome       String
+  username   String   @unique
+  senha      String   // Aqui vai a senha criptografada (hash)
+  permissoes String[] // Array de módulos liberados, ex: ["pacientes", "agenda"]
+  criadoEm   DateTime @default(now())
+  status     String   @default("ativo")
+}
+
+model Transacao {
+  id            String   @id @default(uuid())
+  descricao     String
+  valor         Float
+  tipo          String   // 'RECEITA' ou 'DESPESA'
+  categoria     String   // 'PROCEDIMENTO', 'ESTOQUE', 'FIXO', 'OUTROS'
+  data          DateTime @default(now())
+  
+  // Vínculos Opcionais (Rastreabilidade)
+  agendamentoId String?  
+  agendamento   Agendamento? @relation(fields: [agendamentoId], references: [id])
+  
+  movimentacaoId String? @unique
+  movimentacao   Movimentacao? @relation(fields: [movimentacaoId], references: [id])
+}
