@@ -47,31 +47,35 @@ router.post('/produtos', async (req, res) => {
 // ==============================================================================
 // 3. REGISTRAR MOVIMENTAÇÃO (Entrada ou Saída)
 // ==============================================================================
+// ==============================================================================
+// 3. REGISTRAR MOVIMENTAÇÃO (Entrada ou Saída)
+// ==============================================================================
 router.post('/movimentacao', async (req, res) => {
   const { produtoId, qtd, valorUnitario, tipo, fornecedor, lote, validade } = req.body;
   // tipo: 'ENTRADA' ou 'SAIDA'
 
   try {
-    // 1. Validação de Estoque (Apenas para SAÍDA)
-    if (tipo === 'SAIDA') {
-      const produtoAtual = await prisma.produto.findUnique({ where: { id: produtoId } });
-      
-      if (!produtoAtual) return res.status(404).json({ erro: "Produto não encontrado." });
-      
-      if (produtoAtual.qtd < parseInt(qtd)) {
-        return res.status(400).json({ erro: `Estoque insuficiente. Disponível: ${produtoAtual.qtd}` });
-      }
-    }
+    const qtdInt = parseInt(qtd);
+    const valorFloat = parseFloat(valorUnitario || 0);
 
     // INÍCIO DA TRANSAÇÃO
     const resultado = await prisma.$transaction(async (tx) => {
       
-      // 2. Cria o registro no histórico (Movimentação)
+      // 1. Busca o produto (precisamos dele para checar saldo e fazer a média)
+      const produtoAtual = await tx.produto.findUnique({ where: { id: produtoId } });
+      if (!produtoAtual) throw new Error("Produto não encontrado.");
+
+      // 2. Validação de SAÍDA
+      if (tipo === 'SAIDA' && produtoAtual.qtd < qtdInt) {
+        throw new Error(`Estoque insuficiente. Disponível: ${produtoAtual.qtd}`);
+      }
+      
+      // 3. Cria o registro no histórico (Movimentação)
       const novaMovimentacao = await tx.movimentacao.create({
         data: {
           tipo, 
-          qtd: parseInt(qtd),
-          valorUnitario: parseFloat(valorUnitario || 0),
+          qtd: qtdInt,
+          valorUnitario: valorFloat,
           fornecedor: fornecedor || (tipo === 'SAIDA' ? 'Baixa Manual' : null),
           lote,
           validade: validade ? new Date(validade) : null,
@@ -79,48 +83,60 @@ router.post('/movimentacao', async (req, res) => {
         }
       });
 
-      // 3. Atualiza o saldo do Produto
+      // 4. CÁLCULO DO PREÇO MÉDIO PONDERADO (Apenas em Entradas)
+      let novoPrecoMedio = parseFloat(produtoAtual.precoMedio || 0);
+      
+      if (tipo === 'ENTRADA') {
+        const valorFinanceiroAtual = produtoAtual.qtd * novoPrecoMedio;
+        const valorFinanceiroNovaEntrada = qtdInt * valorFloat;
+        const novaQtdTotal = produtoAtual.qtd + qtdInt;
+        
+        // Evita divisão por zero
+        if (novaQtdTotal > 0) {
+          novoPrecoMedio = (valorFinanceiroAtual + valorFinanceiroNovaEntrada) / novaQtdTotal;
+        }
+      }
+
+      // 5. Atualiza o saldo e o Preço Médio do Produto
       await tx.produto.update({
         where: { id: produtoId },
         data: { 
           qtd: { 
-            // Incrementa se ENTRADA, Decrementa se SAIDA
-            [tipo === 'ENTRADA' ? 'increment' : 'decrement']: parseInt(qtd) 
+            [tipo === 'ENTRADA' ? 'increment' : 'decrement']: qtdInt 
           },
-          // Opcional: Atualiza o preço médio na entrada se desejar
-          // precoMedio: tipo === 'ENTRADA' ? parseFloat(valorUnitario) : undefined
+          // Atualiza o preço médio (se for SAIDA, mantém o valor que já estava)
+          precoMedio: novoPrecoMedio
         }
       });
 
-      // 4. INTEGRAÇÃO FINANCEIRA: Se for ENTRADA (Compra), gera DESPESA
-      if (tipo === 'ENTRADA') {
-        const custoTotal = parseFloat(valorUnitario) * parseInt(qtd);
+      // 6. INTEGRAÇÃO FINANCEIRA: Gera DESPESA se for compra
+      if (tipo === 'ENTRADA' && valorFloat > 0) {
+        const custoTotal = valorFloat * qtdInt;
 
-        // Só lança no financeiro se houver custo
-        if (custoTotal > 0) {
-          // Busca nome do produto para a descrição
-          const prodInfo = await tx.produto.findUnique({ where: { id: produtoId } });
-
-          await tx.transacao.create({
-            data: {
-              tipo: 'DESPESA',
-              categoria: 'ESTOQUE',
-              descricao: `Compra: ${prodInfo.nome} (${qtd} ${prodInfo.unidade}s)`,
-              valor: custoTotal,
-              data: new Date(),
-              movimentacaoId: novaMovimentacao.id // Vincula a despesa a esta entrada de estoque
-            }
-          });
-        }
+        await tx.transacao.create({
+          data: {
+            tipo: 'DESPESA',
+            categoria: 'ESTOQUE',
+            descricao: `Compra: ${produtoAtual.nome} (${qtdInt} ${produtoAtual.unidade}s)`,
+            valor: custoTotal,
+            data: new Date()
+            // Se você tiver o campo movimentacaoId no schema Transacao, adicione aqui:
+            // movimentacaoId: novaMovimentacao.id
+          }
+        });
       }
 
       return novaMovimentacao;
     });
 
-    res.json(resultado);
+    res.status(201).json(resultado);
 
   } catch (error) {
     console.error("Erro na movimentação:", error);
+    // Retorna para o front-end os erros específicos que lançamos na transação
+    if (error.message.includes("Estoque insuficiente") || error.message.includes("Produto não encontrado")) {
+      return res.status(400).json({ erro: error.message });
+    }
     res.status(500).json({ erro: "Erro ao processar movimentação de estoque." });
   }
 });
