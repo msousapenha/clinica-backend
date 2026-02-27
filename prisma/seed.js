@@ -1,13 +1,13 @@
-const { PrismaClient } = require('@prisma/client');
-const bcrypt = require('bcryptjs');
+// 1. ISSO TEM QUE SER A PRIMEIRA LINHA DO ARQUIVO!
+require('dotenv').config(); 
 
-// Instancia sem argumentos (o Prisma lê a var DATABASE_URL sozinho)
-const prisma = new PrismaClient();
+// 2. Agora sim podemos importar o banco, pois as variáveis já existem
+const prisma = require('../src/database');
+const bcrypt = require('bcryptjs');
 
 async function main() {
   console.log('Iniciando o seed...');
 
-  // Verifica se o admin já existe
   const existe = await prisma.usuario.findUnique({
     where: { username: 'admin' },
   });
@@ -22,6 +22,8 @@ async function main() {
         username: 'admin',
         senha: senhaHash,
         status: 'ativo',
+        cargo: 'Administrador',
+        atendePacientes: false,
         permissoes: [
             'dashboard', 'equipe', 'agenda', 'pacientes', 
             'financeiro', 'estoque', 'procedimentos', 'usuarios'

@@ -6,28 +6,43 @@ const authMiddleware = require('../middlewares/auth');
 
 router.use(authMiddleware);
 
-// LISTAR TODOS
+// LISTAR TODA A EQUIPE/USUÁRIOS
 router.get('/', async (req, res) => {
   try {
     const usuarios = await prisma.usuario.findMany({
-      select: { id: true, nome: true, username: true, permissoes: true, status: true } // Não retorna a senha!
+      select: { 
+        id: true, 
+        nome: true, 
+        username: true, 
+        permissoes: true, 
+        status: true,
+        cargo: true,
+        atendePacientes: true,
+        especialidade: true,
+        conselho: true,
+        telefone: true,
+        comissao: true
+      },
+      orderBy: { nome: 'asc' }
     });
     res.json(usuarios);
   } catch (error) {
-    res.status(500).json({ erro: 'Erro ao buscar usuários' });
+    console.error(error);
+    res.status(500).json({ erro: 'Erro ao buscar equipe' });
   }
 });
 
-// CRIAR USUÁRIO
+// CRIAR USUÁRIO / MEMBRO DA EQUIPE
 router.post('/', async (req, res) => {
-  const { nome, username, senha, permissoes } = req.body;
+  const { 
+    nome, username, senha, permissoes, cargo, 
+    atendePacientes, especialidade, conselho, telefone, comissao 
+  } = req.body;
 
   try {
-    // Verifica se já existe
     const existe = await prisma.usuario.findUnique({ where: { username } });
-    if (existe) return res.status(400).json({ erro: 'Usuário já existe.' });
+    if (existe) return res.status(400).json({ erro: 'Nome de usuário (login) já em uso.' });
 
-    // Criptografa a senha
     const hashedPassword = await bcrypt.hash(senha, 10);
 
     const novoUsuario = await prisma.usuario.create({
@@ -35,61 +50,101 @@ router.post('/', async (req, res) => {
         nome,
         username,
         senha: hashedPassword,
-        permissoes: permissoes || [], // Array de strings
+        permissoes: permissoes || [], 
+        cargo: cargo || 'Indefinido',
+        atendePacientes: atendePacientes === true || atendePacientes === 'true',
+        especialidade: especialidade || null,
+        conselho: conselho || null,
+        telefone: telefone || null,
+        comissao: parseInt(comissao) || 0,
         status: 'ativo'
-      }
+      },
+      select: { id: true, nome: true, username: true, cargo: true } // Evita devolver a senha
     });
 
-    res.status(201).json({ 
-      id: novoUsuario.id, 
-      nome: novoUsuario.nome, 
-      username: novoUsuario.username 
-    });
+    res.status(201).json(novoUsuario);
 
   } catch (error) {
     console.error(error);
-    res.status(500).json({ erro: 'Erro ao criar usuário' });
+    res.status(500).json({ erro: 'Erro ao criar membro da equipe' });
   }
 });
 
-// ATUALIZAR (Senha é opcional)
+// ATUALIZAR DADOS DO USUÁRIO
 router.put('/:id', async (req, res) => {
   const { id } = req.params;
-  const { nome, username, permissoes, senha, status } = req.body;
+  const { 
+    nome, username, permissoes, senha, status, cargo, 
+    atendePacientes, especialidade, conselho, telefone, comissao 
+  } = req.body;
 
   try {
-    const dados = { nome, username, permissoes, status };
+    const dados = { 
+      nome, 
+      username, 
+      permissoes, 
+      status,
+      cargo,
+      atendePacientes: atendePacientes === true || atendePacientes === 'true',
+      especialidade,
+      conselho,
+      telefone,
+      comissao: parseInt(comissao) || 0
+    };
 
-    // Só atualiza a senha se ela foi enviada
-    if (senha && senha.trim() !== '') {
+    // Só atualiza a senha se foi enviada e não está vazia
+    if (senha && String(senha).trim() !== '') {
       dados.senha = await bcrypt.hash(senha, 10);
     }
 
     const atualizado = await prisma.usuario.update({
       where: { id },
       data: dados,
-      select: { id: true, nome: true, username: true, permissoes: true, status: true }
+      select: { 
+        id: true, nome: true, username: true, permissoes: true, 
+        status: true, cargo: true, atendePacientes: true 
+      }
     });
 
     res.json(atualizado);
   } catch (error) {
-    res.status(500).json({ erro: 'Erro ao atualizar' });
+    console.error(error);
+    res.status(500).json({ erro: 'Erro ao atualizar membro da equipe' });
   }
 });
 
-// DELETAR (Ou inativar)
+// DELETAR USUÁRIO
 router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   try {
-    // Opção 1: Hard Delete (Apaga do banco)
     await prisma.usuario.delete({ where: { id } });
-    
-    // Opção 2: Soft Delete (Recomendado se tiver vínculos)
-    // await prisma.usuario.update({ where: { id }, data: { status: 'inativo' } });
-    
-    res.json({ mensagem: 'Usuário removido' });
+    res.json({ mensagem: 'Membro da equipe removido' });
   } catch (error) {
-    res.status(500).json({ erro: 'Erro ao deletar' });
+    console.error(error);
+    res.status(500).json({ erro: 'Erro ao deletar. Verifique se o usuário possui agendamentos vinculados.' });
+  }
+});
+
+// ROTA PARA O PRÓPRIO USUÁRIO TROCAR SUA SENHA
+router.put('/perfil/senha', async (req, res) => {
+  const { senha } = req.body;
+  const usuarioId = req.usuarioId; // Pego do token pelo authMiddleware
+
+  try {
+    if (!senha || senha.trim().length < 4) {
+      return res.status(400).json({ erro: 'Senha muito curta.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(senha, 10);
+
+    await prisma.usuario.update({
+      where: { id: usuarioId },
+      data: { senha: hashedPassword }
+    });
+
+    res.json({ mensagem: 'Senha atualizada com sucesso!' });
+  } catch (error) {
+    res.status(500).json({ erro: 'Erro ao trocar senha.' });
   }
 });
 

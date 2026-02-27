@@ -14,23 +14,9 @@ model Paciente {
   status       String   @default("ativo")
   criadoEm     DateTime @default(now())
 
-  // Relações futuras (um paciente pode ter vários agendamentos)
   agendamentos Agendamento[]
   anamnese     Anamnese? 
   evolucoes    Evolucao[]
-}
-
-model Profissional {
-  id            String   @id @default(uuid())
-  nome          String
-  especialidade String
-  conselho      String?
-  telefone      String
-  comissao      Int      @default(0)
-  status        String   @default("ativo")
-
-  agendamentos  Agendamento[]
-  evolucoes     Evolucao[]
 }
 
 model Produto {
@@ -68,10 +54,9 @@ model Procedimento {
   id        String   @id @default(uuid())
   nome      String
   valor     Float
-  status    String   @default("ativo") // 'ativo' ou 'inativo'
+  status    String   @default("ativo")
   criadoEm  DateTime @default(now())
 
-  // Relacionamento com Agendamentos
   agendamentos Agendamento[]
 }
 
@@ -83,13 +68,12 @@ model Agendamento {
   pacienteId     String
   paciente       Paciente @relation(fields: [pacienteId], references: [id])
   
+  // Aponta para a tabela Usuario
   profissionalId String
-  profissional   Profissional @relation(fields: [profissionalId], references: [id])
+  profissional   Usuario  @relation("AgendamentoProfissional", fields: [profissionalId], references: [id])
 
   insumosUsados  Movimentacao[]
-
   procedimentos  Procedimento[]
-
   transacaoFinanceira Transacao[]
 }
 
@@ -111,18 +95,31 @@ model Evolucao {
   pacienteId     String
   paciente       Paciente @relation(fields: [pacienteId], references: [id], onDelete: Cascade)
 
+  // Aponta para a tabela Usuario
   profissionalId String?
-  profissional   Profissional? @relation(fields: [profissionalId], references: [id])
+  profissional   Usuario? @relation("EvolucaoProfissional", fields: [profissionalId], references: [id])
 }
 
 model Usuario {
-  id         String   @id @default(uuid())
-  nome       String
-  username   String   @unique
-  senha      String   // Aqui vai a senha criptografada (hash)
-  permissoes String[] // Array de módulos liberados, ex: ["pacientes", "agenda"]
-  criadoEm   DateTime @default(now())
-  status     String   @default("ativo")
+  id              String   @id @default(uuid())
+  nome            String
+  username        String   @unique
+  senha           String   
+  permissoes      String[] 
+  criadoEm        DateTime @default(now())
+  status          String   @default("ativo")
+
+  // --- NOVOS CAMPOS: CARGO E ATENDIMENTO ---
+  cargo           String   @default("Indefinido") // Ex: Recepcionista, Biomédica, Esteticista, Admin
+  atendePacientes Boolean  @default(false)        // Se TRUE, aparece na Agenda e nos selects de evolução
+  especialidade   String?  // Opcional
+  conselho        String?  // Opcional (CRM/CRO/COREN)
+  telefone        String?  // Opcional
+  comissao        Int      @default(0)
+
+  // Relações com os atendimentos
+  agendamentos Agendamento[] @relation("AgendamentoProfissional")
+  evolucoes    Evolucao[]    @relation("EvolucaoProfissional")
 }
 
 model Transacao {
@@ -133,7 +130,6 @@ model Transacao {
   categoria     String   // 'PROCEDIMENTO', 'ESTOQUE', 'FIXO', 'OUTROS'
   data          DateTime @default(now())
   
-  // Vínculos Opcionais (Rastreabilidade)
   agendamentoId String?  
   agendamento   Agendamento? @relation(fields: [agendamentoId], references: [id])
   
